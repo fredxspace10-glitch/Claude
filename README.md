@@ -41,6 +41,7 @@ Todos duran **mínimo 61 segundos** (por defecto entre 61 y 95 s). Los cortes ca
 - **Subtítulos automáticos** (Whisper) estilo TikTok, con la palabra que se está diciendo resaltada en amarillo.
 - **Vertical 9:16** con fondo desenfocado (u horizontal 16:9).
 - **Zoom cada ~10 s** y **transiciones animadas** (deslizar, círculo, flash blanco, zoom, píxeles…), con la opción de **invertir las transiciones**.
+- **Crédito visible** del creador en la esquina durante todo el clip y en la descripción (campo "Crédito", p. ej. `Contenido: @alofoke`), como suelen exigir los programas de clippers.
 - **Invertir la imagen (espejo)**, mejora de color, rótulo inicial ("MOMENTO TOP #1"), barra de progreso y audio con el volumen igualado (-14 LUFS).
 
 ## Uso por terminal
@@ -50,6 +51,7 @@ python cli.py "https://www.youtube.com/live/Dxi1CRQMQZo"
 python cli.py "https://www.youtube.com/live/Dxi1CRQMQZo" --limit-minutes 30 --mirror --reverse-transitions
 python cli.py "https://www.youtube.com/live/Dxi1CRQMQZo" --no-make-full --top-count 10 --moment-count 30
 python cli.py "https://www.youtube.com/live/Dxi1CRQMQZo" --min-seconds 90 --clip-seconds 100 --max-seconds 150
+python cli.py "https://www.youtube.com/live/Dxi1CRQMQZo" --credit "Contenido: @alofoke"
 python cli.py mi_video.mp4        # también funciona con un vídeo de tu PC
 ```
 `python cli.py --help` muestra todas las opciones.

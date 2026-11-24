@@ -36,7 +36,7 @@ def hashtags(clip_text: str, global_text: str) -> List[str]:
     return tags[:5]
 
 
-def write_publish_file(path: str, title: str, source_url: str, clips: List[dict]):
+def write_publish_file(path: str, title: str, source_url: str, clips: List[dict], credit: str = ""):
     all_text = " ".join(c.get("text", "") for c in clips)
     out = [f"CLIPS DE: {title}", f"Original: {source_url}", "",
            "Todos los clips duran más de 1 minuto (requisito para monetizar en TikTok y Facebook).",
@@ -51,8 +51,8 @@ def write_publish_file(path: str, title: str, source_url: str, clips: List[dict]
         out += [
             f"▶ ARCHIVO: {c['file']}   ({fmt_time(c['duration'])} min · minuto {c['range']} del directo)",
             f"TÍTULO: {c['title']}",
-            f"DESCRIPCIÓN TIKTOK: {c['title']} {' '.join(tags + extra['tiktok'])}",
-            f"DESCRIPCIÓN FACEBOOK: {c['title']}\n{' '.join(tags + extra['facebook'])}",
+            f"DESCRIPCIÓN TIKTOK: {c['title']}{' · ' + credit if credit else ''} {' '.join(tags + extra['tiktok'])}",
+            f"DESCRIPCIÓN FACEBOOK: {c['title']}{chr(10) + credit if credit else ''}\n{' '.join(tags + extra['facebook'])}",
         ]
         if c.get("source_link"):
             out.append(f"CRÉDITO / ORIGINAL: {c['source_link']}")

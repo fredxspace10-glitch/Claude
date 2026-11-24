@@ -121,7 +121,7 @@ def run_job(job: Job) -> Job:
             json.dump({"title": job.title, "source": base_url, "clips": job.clips}, f,
                       ensure_ascii=False, indent=2)
         publish.write_publish_file(os.path.join(job.out_dir, "PUBLICAR.txt"), job.title,
-                                   base_url if not local else o.url, job.clips)
+                                   base_url if not local else o.url, job.clips, o.credit)
         job.status = "terminado"
         job.progress = 100
         job.log(f"Terminado: {len(job.clips)} clips. Están en: {job.out_dir}")

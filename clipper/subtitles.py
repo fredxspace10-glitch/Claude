@@ -34,7 +34,8 @@ def _chunks(words: List[dict], per_line: int) -> List[List[dict]]:
 
 
 def build_ass(words: List[dict], clip_start: float, clip_end: float, width: int, height: int,
-              font: str = "Arial", per_line: int = 3, hook: str = "", hook_seconds: float = 2.8) -> str:
+              font: str = "Arial", per_line: int = 3, hook: str = "", hook_seconds: float = 2.8,
+              credit: str = "") -> str:
     vertical = height > width
     size = int(height * (0.045 if vertical else 0.06))
     margin_v = int(height * (0.27 if vertical else 0.08))
@@ -52,12 +53,15 @@ ScaledBorderAndShadow: yes
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Sub,{font},{size},&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,{max(3, size // 14)},2,2,60,60,{margin_v},1
+Style: Credit,{font},{int(height * (0.022 if vertical else 0.03))},&H30FFFFFF,&H30FFFFFF,&H60000000,&H00000000,-1,0,0,0,100,100,0,0,1,2,1,9,40,40,{int(height * (0.05 if vertical else 0.04))},1
 Style: Hook,{font},{hook_size},&H00FFFFFF,&H00FFFFFF,&H00000000,&HC0101010,-1,0,0,0,100,100,1,0,3,{max(10, hook_size // 4)},0,8,60,60,{hook_margin},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
     lines = [head]
+    if credit:
+        lines.append(f"Dialogue: 2,{_ts(0)},{_ts(dur)},Credit,,0,0,0,,{_clean(credit)}\n")
     if hook:
         lines.append(f"Dialogue: 1,{_ts(0.15)},{_ts(min(hook_seconds, dur))},Hook,,0,0,0,,"
                      rf"{{\fad(150,250)}}{_clean(hook.upper())}" + "\n")

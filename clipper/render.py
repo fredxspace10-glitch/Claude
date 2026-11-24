@@ -115,11 +115,12 @@ def render_clip(source: str, clip: Clip, words: List[dict], snap: PauseSnapper, 
     W, H = (1080, 1920) if opts.vertical else (1920, 1080)
     ass_name = ""
     hook = HOOKS[clip.kind].format(i=clip.index) if opts.hook_title else ""
-    if opts.subtitles or hook:
+    if opts.subtitles or hook or opts.credit:
         ass_name = f"{name}.ass"
         with open(os.path.join(tmp_dir, ass_name), "w", encoding="utf-8") as fh:
             fh.write(build_ass(words if opts.subtitles else [], clip.start, clip.end, W, H,
-                               font=opts.font, per_line=opts.words_per_line, hook=hook))
+                               font=opts.font, per_line=opts.words_per_line, hook=hook,
+                               credit=opts.credit))
 
     audio = has_audio(source)
     cuts = _cut_points(clip, snap, opts.segment_seconds, opts.transition_seconds) if opts.transitions else []

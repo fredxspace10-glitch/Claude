@@ -67,6 +67,7 @@
         <select name="language"><option value="es" selected>Español</option><option value="en">Inglés</option><option value="auto">Detectar</option></select></div>
       <div><label>Cookies del navegador (si YouTube lo pide)</label>
         <select name="cookies_browser"><option value="">No usar</option><option>chrome</option><option>edge</option><option>firefox</option><option>brave</option><option>opera</option></select></div>
+      <div><label>Crédito visible en el vídeo y en la descripción</label><input type="text" name="credit" value="{{ defaults.credit }}" placeholder="Contenido: @alofoke"></div>
       <div><label>Clips en paralelo</label><input type="number" name="workers" value="{{ defaults.workers }}"></div>
     </div>
     <div class="checks">
@@ -80,7 +81,7 @@
       <label><input type="checkbox" name="hook_title" checked> Rótulo inicial</label>
     </div>
     <button id="go" type="submit">Crear clips</button>
-    <p class="warn">Úsalo con tus propios directos o con permiso del creador. La primera vez se descarga el modelo de subtítulos.</p>
+    <p class="warn">Úsalo con tus propios directos o con permiso del creador (pon su crédito arriba). La primera vez se descarga el modelo de subtítulos.</p>
   </form>
 
   <section class="card" id="status" hidden>

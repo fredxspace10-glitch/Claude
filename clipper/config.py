@@ -33,6 +33,7 @@ class Options:
     transition_seconds: float = 0.45
     color_boost: bool = True       # contraste/saturación ligeramente mejorados
     hook_title: bool = True        # rótulo en los primeros segundos
+    credit: str = ""               # crédito visible todo el clip, p. ej. "Contenido: @alofokeradioshow"
 
     # Subtítulos
     subtitles: bool = True
