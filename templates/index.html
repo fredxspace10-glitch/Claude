@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LiveClipper</title>
+<style>
+  :root { --bg:#0f1115; --card:#181b22; --line:#2a2f3a; --text:#e8eaf0; --muted:#9aa3b2; --acc:#ffd400; --red:#ff4d4d; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:15px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:var(--bg); color:var(--text); }
+  main { max-width:1100px; margin:0 auto; padding:24px 16px 60px; }
+  h1 { margin:0 0 4px; font-size:26px; } h1 span { color:var(--acc); }
+  .sub { color:var(--muted); margin:0 0 20px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px; margin-bottom:16px; }
+  label { display:block; font-size:13px; color:var(--muted); margin-bottom:4px; }
+  input[type=text], input[type=number], select { width:100%; padding:9px 10px; border-radius:8px; border:1px solid var(--line); background:#0c0e12; color:var(--text); font:inherit; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:12px; margin-top:12px; }
+  .checks { display:flex; flex-wrap:wrap; gap:8px 18px; margin-top:14px; }
+  .checks label { display:flex; gap:6px; align-items:center; color:var(--text); font-size:14px; margin:0; }
+  button { margin-top:16px; background:var(--acc); color:#111; border:0; padding:11px 20px; border-radius:8px; font-weight:700; font-size:15px; cursor:pointer; }
+  button:disabled { opacity:.5; cursor:default; }
+  .bar { height:8px; background:#0c0e12; border-radius:99px; overflow:hidden; margin:10px 0; }
+  .bar > div { height:100%; width:0; background:var(--acc); transition:width .4s; }
+  pre { background:#0c0e12; border-radius:8px; padding:10px; max-height:220px; overflow:auto; font-size:12px; color:var(--muted); white-space:pre-wrap; margin:0; }
+  .tabs { display:flex; gap:8px; margin:6px 0 14px; flex-wrap:wrap; }
+  .tabs button { margin:0; background:#0c0e12; color:var(--text); border:1px solid var(--line); font-weight:500; padding:7px 14px; }
+  .tabs button.on { background:var(--acc); color:#111; border-color:var(--acc); }
+  .clips { display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:14px; }
+  .clip { background:#0c0e12; border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+  .clip video { width:100%; display:block; background:#000; max-height:390px; }
+  .clip .meta { padding:10px; font-size:13px; }
+  .clip .t { font-weight:600; margin-bottom:4px; }
+  .clip .m { color:var(--muted); }
+  .clip a { color:var(--acc); text-decoration:none; margin-right:10px; }
+  .warn { color:var(--muted); font-size:13px; margin-top:10px; }
+  .err { color:var(--red); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Live<span>Clipper</span></h1>
+  <p class="sub">Convierte un directo de YouTube en clips de 1 minuto, destacados y momentos cortos, con subtítulos automáticos y transiciones.</p>
+
+  <form class="card" id="f">
+    <label for="url">Enlace del directo (o ruta a un vídeo de tu PC)</label>
+    <input type="text" id="url" name="url" value="{{ defaults.url }}">
+    <div class="grid">
+      <div><label>Duración clip (s)</label><input type="number" name="clip_seconds" value="{{ defaults.clip_seconds }}"></div>
+      <div><label>Duración momento corto (s)</label><input type="number" name="short_seconds" value="{{ defaults.short_seconds }}"></div>
+      <div><label>Nº destacados (0 = auto)</label><input type="number" name="top_count" value="0"></div>
+      <div><label>Nº momentos cortos (0 = auto)</label><input type="number" name="short_count" value="0"></div>
+      <div><label>Corte interno cada (s)</label><input type="number" step="0.5" name="segment_seconds" value="{{ defaults.segment_seconds }}"></div>
+      <div><label>Solo primeros N min (0 = todo)</label><input type="number" name="limit_minutes" value="0"></div>
+      <div><label>Modelo de subtítulos</label>
+        <select name="whisper_model">
+          <option value="tiny">tiny (muy rápido)</option><option value="base">base</option>
+          <option value="small" selected>small (recomendado)</option><option value="medium">medium</option>
+          <option value="large-v3">large-v3 (más preciso)</option>
+        </select></div>
+      <div><label>Idioma</label>
+        <select name="language"><option value="es" selected>Español</option><option value="en">Inglés</option><option value="auto">Detectar</option></select></div>
+      <div><label>Clips en paralelo</label><input type="number" name="workers" value="{{ defaults.workers }}"></div>
+    </div>
+    <div class="checks">
+      <label><input type="checkbox" name="make_full" checked> Todo el directo en partes de 1 min</label>
+      <label><input type="checkbox" name="vertical" checked> Vertical 9:16 (Shorts/TikTok)</label>
+      <label><input type="checkbox" name="subtitles" checked> Subtítulos automáticos</label>
+      <label><input type="checkbox" name="transitions" checked> Zooms + transiciones</label>
+      <label><input type="checkbox" name="reverse_transitions"> Invertir transiciones</label>
+      <label><input type="checkbox" name="mirror"> Invertir imagen (espejo)</label>
+      <label><input type="checkbox" name="color_boost" checked> Mejorar color</label>
+      <label><input type="checkbox" name="hook_title" checked> Rótulo inicial</label>
+    </div>
+    <button id="go" type="submit">Crear clips</button>
+    <p class="warn">Úsalo con tus propios directos o con permiso del creador. La primera vez se descarga el modelo de subtítulos.</p>
+  </form>
+
+  <section class="card" id="status" hidden>
+    <div><strong id="st">—</strong> <span id="ttl" class="m"></span></div>
+    <div class="bar"><div id="pb"></div></div>
+    <pre id="log"></pre>
+  </section>
+
+  <section class="card" id="res" hidden>
+    <div class="tabs" id="tabs"></div>
+    <div class="clips" id="clips"></div>
+  </section>
+</main>
+<script>
+const $ = s => document.querySelector(s);
+let jobId = null, filter = "destacado", lastCount = -1, data = [];
+const LABEL = {destacado:"Destacados", corto:"Momentos cortos", completo:"Todo el directo"};
+
+$("#f").addEventListener("submit", async e => {
+  e.preventDefault();
+  const fd = new FormData(e.target), body = {};
+  for (const [k, v] of fd.entries()) body[k] = v;
+  e.target.querySelectorAll("input[type=checkbox]").forEach(c => body[c.name] = c.checked);
+  $("#go").disabled = true;
+  const r = await fetch("/api/jobs", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)});
+  const j = await r.json();
+  if (!r.ok) { alert(j.error || "Error"); $("#go").disabled = false; return; }
+  jobId = j.id; lastCount = -1; $("#status").hidden = false; poll();
+});
+
+async function poll() {
+  const r = await fetch("/api/jobs/" + jobId); const s = await r.json();
+  $("#st").textContent = s.status; $("#st").className = s.status === "error" ? "err" : "";
+  $("#ttl").textContent = s.title ? "· " + s.title : "";
+  $("#pb").style.width = s.progress + "%";
+  const log = $("#log"); log.textContent = s.logs.join("\n"); log.scrollTop = log.scrollHeight;
+  data = s.clips;
+  if (data.length !== lastCount) { lastCount = data.length; renderClips(); }
+  if (s.status === "terminado" || s.status === "error") { $("#go").disabled = false; return; }
+  setTimeout(poll, 2000);
+}
+
+function renderClips() {
+  if (!data.length) return;
+  $("#res").hidden = false;
+  const kinds = ["destacado", "corto", "completo"].filter(k => data.some(c => c.kind === k));
+  if (!kinds.includes(filter)) filter = kinds[0];
+  $("#tabs").innerHTML = kinds.map(k => `<button type="button" class="${k===filter?'on':''}" data-k="${k}">${LABEL[k]} (${data.filter(c=>c.kind===k).length})</button>`).join("");
+  $("#tabs").querySelectorAll("button").forEach(b => b.onclick = () => { filter = b.dataset.k; renderClips(); });
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+  $("#clips").innerHTML = data.filter(c => c.kind === filter).map(c => {
+    const src = `/media/${jobId}/${c.file}`;
+    return `<div class="clip"><video src="${src}" controls preload="metadata"></video>
+      <div class="meta"><div class="t">${esc(c.title)}</div>
+      <div class="m">${c.range} · ${Math.round(c.duration)} s</div>
+      <div><a href="${src}?dl=1">Descargar</a>${c.source_link ? `<a href="${c.source_link}" target="_blank" rel="noopener">Ver original</a>` : ""}</div></div></div>`;
+  }).join("");
+}
+</script>
+</body>
+</html>
