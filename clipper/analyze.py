@@ -19,7 +19,7 @@ KEYWORDS = [
 
 @dataclass
 class Clip:
-    kind: str          # "completo" | "destacado" | "corto"
+    kind: str          # "completo" | "destacado" | "momento"
     index: int
     start: float
     end: float
@@ -145,6 +145,16 @@ class PauseSnapper:
                 pts.append((a["end"] + b["start"]) / 2)
         self.pts = np.array(pts)
 
+    def snap_in(self, target: float, lo: float, hi: float) -> float:
+        """Pausa más cercana a `target` dentro de [lo, hi]; si no hay, `target` acotado."""
+        if hi < lo:
+            return hi
+        if len(self.pts):
+            cand = self.pts[(self.pts >= lo) & (self.pts <= hi)]
+            if len(cand):
+                return float(cand[np.argmin(np.abs(cand - target))])
+        return float(min(max(target, lo), hi))
+
     def snap(self, t: float, tol: float) -> float:
         if not len(self.pts):
             return t
@@ -179,56 +189,93 @@ def text_between(words: List[dict], start: float, end: float) -> str:
     return " ".join(w["word"] for w in words if start <= w["start"] < end).strip()
 
 
+KIND_LABEL = {"completo": "Parte", "destacado": "Momento top", "momento": "Momento"}
+
+
 def make_title(text: str, kind: str, idx: int) -> str:
     if not text:
-        return {"completo": "Parte", "destacado": "Momento top", "corto": "Momento corto"}[kind] + f" {idx}"
+        return f"{KIND_LABEL[kind]} {idx}"
     first = re.split(r"(?<=[.!?¿¡])\s", text)[0]
     words = first.split()
     t = " ".join(words[:10])
     return (t[:1].upper() + t[1:]).rstrip(",;:") + ("…" if len(words) > 10 else "")
 
 
+def _overlap(a0, a1, b0, b1) -> float:
+    return max(0.0, min(a1, b1) - max(a0, b0))
+
+
+def _fit(start: float, duration: float, snap: "PauseSnapper", o) -> tuple:
+    """Ajusta (inicio, fin) a pausas del habla garantizando min_seconds <= duración <= max_seconds."""
+    mn, target, mx = float(o.min_seconds), float(o.clip_seconds), float(max(o.max_seconds, o.min_seconds))
+    if duration <= mn:
+        return 0.0, duration
+    s = snap.snap_in(start, start - 3, start + 1)
+    s = min(max(0.0, s), duration - mn)
+    e = snap.snap_in(s + target, s + mn, min(duration, s + mx))
+    e = min(e, duration)
+    if e - s < mn:  # al final del vídeo: se retrocede el inicio para no bajar del mínimo
+        s = max(0.0, e - mn)
+    return round(s, 2), round(e, 2)
+
+
 def plan_clips(duration: float, score: np.ndarray, words: List[dict], opts) -> List[Clip]:
     snap = PauseSnapper(words)
     clips: List[Clip] = []
+    mn = float(opts.min_seconds)
     L = int(opts.clip_seconds)
     minutes = duration / 60
+    if duration < mn:
+        # vídeo más corto que el mínimo: un único clip con todo
+        c = Clip("completo", 1, 0.0, round(duration, 2), float(score.mean()))
+        c.text = text_between(words, c.start, c.end)
+        c.title = make_title(c.text, c.kind, 1)
+        return [c]
 
-    # 1) Todo el directo en partes de ~1 minuto (cada momento)
+    # 1) Todo el directo en partes de ~1 minuto, ninguna por debajo del mínimo
     if opts.make_full:
         t, i = 0.0, 1
-        while t < duration - 1:
-            end = min(duration, snap.snap(t + L, tol=6))
-            if duration - end < L * 0.25:
-                end = duration
-            sc = float(score[int(t):int(end)].mean()) if end > t + 1 else 0.0
-            clips.append(Clip("completo", i, round(t, 2), round(end, 2), sc))
+        while duration - t >= 1:
+            e = snap.snap_in(t + L, t + mn, min(duration, t + opts.max_seconds))
+            if duration - e < mn:      # lo que queda no llega al mínimo: se une a esta parte
+                e = duration
+            sc = float(score[int(t):int(e)].mean()) if e > t + 1 else 0.0
+            clips.append(Clip("completo", i, round(t, 2), round(e, 2), sc))
             i += 1
-            t = end
+            t = e
             if opts.max_full_clips and i > opts.max_full_clips:
                 break
 
-    # 2) Destacados de 1 minuto (los picos de energía/chat/habla)
+    # 2) Destacados: los minutos completos con más energía
     top_n = opts.top_count or max(3, round(minutes / 6))
-    top = _top_windows(score, L, top_n, gap=5, taken=[])
-    for rank, (a, b, sc) in enumerate(top, 1):
-        s = max(0.0, snap.snap(a, tol=3))
-        e = min(duration, snap.snap(s + L, tol=4))
-        clips.append(Clip("destacado", rank, round(s, 2), round(e, 2), sc))
+    chosen: List[tuple] = []
+    for rank, (a, b, sc) in enumerate(_top_windows(score, L, top_n, gap=5, taken=[]), 1):
+        s, e = _fit(a, duration, snap, opts)
+        clips.append(Clip("destacado", rank, s, e, sc))
+        chosen.append((s, e))
 
-    # 3) Momentos cortos (más cantidad de contenido)
-    S = int(opts.short_seconds)
-    short_n = opts.short_count or max(5, round(minutes / 3))
-    shorts = _top_windows(score, S, short_n, gap=3, taken=[])
-    for rank, (a, b, sc) in enumerate(shorts, 1):
-        s = max(0.0, snap.snap(a, tol=2))
-        e = min(duration, snap.snap(s + S, tol=2))
-        clips.append(Clip("corto", rank, round(s, 2), round(e, 2), sc))
+    # 3) Momentos: picos cortos (reacciones, risas, gritos) ampliados a +1 min con contexto,
+    #    empezando unos segundos antes del pico para que se entienda qué pasa.
+    P = int(opts.peak_seconds)
+    want = opts.moment_count or max(5, round(minutes / 3))
+    rank = 0
+    for a, b, sc in _top_windows(score, P, want * 3, gap=3, taken=[]):
+        lead = (L - P) * 0.6
+        s, e = _fit(max(0.0, a - lead), duration, snap, opts)
+        if any(_overlap(s, e, x0, x1) > 0.5 * (e - s) for x0, x1 in chosen):
+            continue  # demasiado parecido a otro destacado/momento
+        if any(_overlap(s, e, c.start, c.end) > 0.9 * (e - s) for c in clips if c.kind == "completo"):
+            continue  # prácticamente igual a una parte del directo completo
+        rank += 1
+        clips.append(Clip("momento", rank, s, e, sc))
+        chosen.append((s, e))
+        if rank >= want:
+            break
 
     for c in clips:
         c.text = text_between(words, c.start, c.end)
         c.title = make_title(c.text, c.kind, c.index)
-    return [c for c in clips if c.duration >= 3]
+    return clips
 
 
 def save_analysis(path: str, score: np.ndarray, clips: List[Clip]):

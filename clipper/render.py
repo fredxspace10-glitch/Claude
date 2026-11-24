@@ -14,7 +14,8 @@ REVERSED = {"slideleft": "slideright", "slideright": "slideleft", "slideup": "sl
             "smoothdown": "smoothup", "circleopen": "circleclose", "circleclose": "circleopen",
             "zoomin": "fadeblack", "fadewhite": "fadeblack"}
 ZOOMS = [1.0, 1.14, 1.0, 1.24, 1.07]
-HOOKS = {"completo": "Parte {i}", "destacado": "Momento top #{i}", "corto": "No te lo pierdas"}
+HOOKS = {"completo": "Parte {i}", "destacado": "Momento top #{i}", "momento": "No te lo pierdas"}
+FOLDERS = {"destacado": "1_destacados", "momento": "2_momentos", "completo": "3_directo_completo"}
 FPS = 30
 
 
@@ -100,42 +101,47 @@ def build_filter(clip: Clip, opts, cuts: List[float], ass_name: str, audio: bool
 
 
 def render_clip(source: str, clip: Clip, words: List[dict], snap: PauseSnapper, opts,
-                clips_dir: str, log: Log) -> str:
-    os.makedirs(clips_dir, exist_ok=True)
-    name = f"{clip.kind}_{clip.index:03d}"
-    out_file = f"{name}.mp4"
-    if os.path.exists(os.path.join(clips_dir, out_file)):
-        return out_file
+                out_dir: str, tmp_dir: str, log: Log) -> str:
+    """Renderiza el clip y devuelve su ruta relativa a out_dir (p. ej. 1_destacados/destacado_01.mp4)."""
+    folder = os.path.join(out_dir, FOLDERS[clip.kind])
+    os.makedirs(folder, exist_ok=True)
+    os.makedirs(tmp_dir, exist_ok=True)
+    name = f"{clip.kind}_{clip.index:02d}"
+    rel = f"{FOLDERS[clip.kind]}/{name}.mp4"
+    final = os.path.join(out_dir, rel)
+    if os.path.exists(final):
+        return rel
 
     W, H = (1080, 1920) if opts.vertical else (1920, 1080)
     ass_name = ""
     hook = HOOKS[clip.kind].format(i=clip.index) if opts.hook_title else ""
     if opts.subtitles or hook:
         ass_name = f"{name}.ass"
-        with open(os.path.join(clips_dir, ass_name), "w", encoding="utf-8") as fh:
+        with open(os.path.join(tmp_dir, ass_name), "w", encoding="utf-8") as fh:
             fh.write(build_ass(words if opts.subtitles else [], clip.start, clip.end, W, H,
                                font=opts.font, per_line=opts.words_per_line, hook=hook))
 
     audio = has_audio(source)
     cuts = _cut_points(clip, snap, opts.segment_seconds, opts.transition_seconds) if opts.transitions else []
     graph, _ = build_filter(clip, opts, cuts, ass_name, audio)
-    script = os.path.join(clips_dir, f"{name}.filter.txt")
-    with open(script, "w", encoding="utf-8") as fh:
+    with open(os.path.join(tmp_dir, f"{name}.filter.txt"), "w", encoding="utf-8") as fh:
         fh.write(graph)
 
-    tmp = f"{name}.part.mp4"
+    part = final + ".part.mp4"
     cmd = [require("ffmpeg"), "-y", "-hide_banner", "-loglevel", "error",
            "-ss", f"{clip.start:.3f}", "-t", f"{clip.duration:.3f}", "-i", os.path.abspath(source),
            "-filter_complex_script", f"{name}.filter.txt", "-map", "[vout]"]
     if audio:
         cmd += ["-map", "[aout]", "-c:a", "aac", "-b:a", "160k"]
     cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
-            "-r", str(FPS), "-movflags", "+faststart", "-t", f"{clip.duration:.3f}", "-f", "mp4", tmp]
-    run(cmd, log=log, cwd=clips_dir)
-    os.replace(os.path.join(clips_dir, tmp), os.path.join(clips_dir, out_file))
-    for extra in (script,):
-        try:
-            os.remove(extra)
-        except OSError:
-            pass
-    return out_file
+            "-r", str(FPS), "-movflags", "+faststart", "-t", f"{clip.duration:.3f}", "-f", "mp4", part]
+    # se ejecuta dentro de tmp_dir para que la ruta de los subtítulos no necesite escaparse
+    run(cmd, log=log, cwd=tmp_dir)
+    os.replace(part, final)
+    for extra in (f"{name}.filter.txt", ass_name):
+        if extra:
+            try:
+                os.remove(os.path.join(tmp_dir, extra))
+            except OSError:
+                pass
+    return rel

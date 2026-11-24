@@ -6,7 +6,7 @@ import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable, List, Optional
 
-from . import analyze, download, render, transcribe
+from . import analyze, download, publish, render, transcribe
 from .config import Options
 from .utils import ffprobe_duration, fmt_time
 
@@ -21,6 +21,7 @@ class Job:
         self.error = ""
         self.title = ""
         self.job_dir = ""
+        self.out_dir = ""   # carpeta final con los clips listos para subir
         self.started = time.time()
         self._on_update = on_update
 
@@ -35,7 +36,7 @@ class Job:
     def snapshot(self) -> dict:
         return {"status": self.status, "progress": round(self.progress, 1), "title": self.title,
                 "error": self.error, "logs": self.logs[-60:], "clips": self.clips,
-                "job": os.path.basename(self.job_dir)}
+                "job": os.path.basename(self.job_dir), "out_dir": self.out_dir}
 
 
 def run_job(job: Job) -> Job:
@@ -57,8 +58,10 @@ def run_job(job: Job) -> Job:
             job.log(f"Usando archivo local: {source}")
         else:
             source, chat, info = download.download(o.url, job.job_dir, job.log, o.cookies,
-                                                   o.max_height, o.limit_minutes)
+                                                   o.max_height, o.limit_minutes, o.cookies_browser)
         job.title = info.get("title") or vid
+        job.out_dir = publish.folder_for(o.clips_dir, job.title, vid)
+        job.log(f"Los clips se guardarán en: {job.out_dir}")
         duration = ffprobe_duration(source)
         job.log(f"Duración del vídeo: {fmt_time(duration)}")
         job.progress = 15
@@ -81,21 +84,23 @@ def run_job(job: Job) -> Job:
         score = analyze.score_timeline(source, duration, words, chat)
         plan = analyze.plan_clips(duration, score, words, o)
         analyze.save_analysis(os.path.join(job.job_dir, "analysis.json"), score, plan)
-        counts = {k: sum(1 for c in plan if c.kind == k) for k in ("completo", "destacado", "corto")}
-        job.log(f"Plan: {counts['completo']} partes de 1 min, {counts['destacado']} destacados, "
-                f"{counts['corto']} momentos cortos.")
+        counts = {k: sum(1 for c in plan if c.kind == k) for k in ("completo", "destacado", "momento")}
+        job.log(f"Plan: {counts['destacado']} destacados, {counts['momento']} momentos y "
+                f"{counts['completo']} partes del directo completo (todos de {o.min_seconds}+ s).")
         job.progress = 50
 
         # 4. Renderizado
         job.status = "renderizando clips"
-        clips_dir = os.path.join(job.job_dir, "clips")
+        tmp_dir = os.path.join(job.job_dir, "_tmp")
         snap = analyze.PauseSnapper(words)
         base_url = info.get("webpage_url") or o.url
         done = 0
         # primero los destacados y cortos: son los más valiosos
-        order = sorted(plan, key=lambda c: {"destacado": 0, "corto": 1, "completo": 2}[c.kind])
+        rank = {"destacado": 0, "momento": 1, "completo": 2}
+        order = sorted(plan, key=lambda c: rank[c.kind])
         with ThreadPoolExecutor(max_workers=max(1, o.workers)) as pool:
-            futs = {pool.submit(render.render_clip, source, c, words, snap, o, clips_dir, lambda m: None): c
+            futs = {pool.submit(render.render_clip, source, c, words, snap, o, job.out_dir, tmp_dir,
+                                lambda m: None): c
                     for c in order}
             for fut in as_completed(futs):
                 c = futs[fut]
@@ -111,13 +116,17 @@ def run_job(job: Job) -> Job:
                 done += 1
                 job.progress = 50 + 50 * done / max(1, len(order))
 
-        job.clips.sort(key=lambda d: ({"destacado": 0, "corto": 1, "completo": 2}[d["kind"]], d["index"]))
-        with open(os.path.join(clips_dir, "clips.json"), "w", encoding="utf-8") as f:
+        job.clips.sort(key=lambda d: (rank[d["kind"]], d["index"]))
+        with open(os.path.join(job.out_dir, "clips.json"), "w", encoding="utf-8") as f:
             json.dump({"title": job.title, "source": base_url, "clips": job.clips}, f,
                       ensure_ascii=False, indent=2)
+        publish.write_publish_file(os.path.join(job.out_dir, "PUBLICAR.txt"), job.title,
+                                   base_url if not local else o.url, job.clips)
         job.status = "terminado"
         job.progress = 100
-        job.log(f"Terminado: {len(job.clips)} clips en {clips_dir}")
+        job.log(f"Terminado: {len(job.clips)} clips. Están en: {job.out_dir}")
+        job.log("Dentro: 1_destacados, 2_momentos, 3_directo_completo y PUBLICAR.txt "
+                "(títulos y hashtags para cada clip).")
     except Exception as e:
         job.status = "error"
         job.error = str(e)

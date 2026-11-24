@@ -5,18 +5,24 @@ from dataclasses import dataclass, asdict, fields
 class Options:
     # Fuente
     url: str = ""                  # enlace de YouTube o ruta a un archivo local
-    workdir: str = "output"
-    cookies: str = ""              # cookies.txt opcional (directos con restricción de edad/miembros)
+    workdir: str = "output"        # descargas y caché (vídeo original, transcripción)
+    clips_dir: str = "CLIPS"       # AQUÍ quedan los clips listos para subir
+    cookies: str = ""              # ruta a cookies.txt (si YouTube pide "confirmar que no eres un bot")
+    cookies_browser: str = ""      # o leerlas del navegador: chrome / edge / firefox / brave
     max_height: int = 1080
     limit_minutes: int = 0         # 0 = todo el directo
 
     # Qué clips generar
-    clip_seconds: int = 60         # duración de los clips "completos" y "destacados"
-    short_seconds: int = 20        # duración de los "momentos cortos"
-    make_full: bool = True         # cortar TODO el directo en clips de 1 minuto
+    # TikTok (Creator Rewards) y Facebook solo monetizan vídeos de MÁS de 1 minuto,
+    # así que ningún clip baja de min_seconds.
+    min_seconds: int = 61          # duración mínima garantizada de TODOS los clips
+    clip_seconds: int = 70         # duración objetivo
+    max_seconds: int = 95          # duración máxima (salvo la última parte del directo)
+    make_full: bool = True         # cortar TODO el directo en partes de ~1 minuto
     max_full_clips: int = 0        # 0 = sin límite
-    top_count: int = 0             # destacados de 1 min (0 = automático)
-    short_count: int = 0           # momentos cortos (0 = automático)
+    top_count: int = 0             # destacados: los minutos con más energía (0 = automático)
+    moment_count: int = 0          # momentos: picos cortos ampliados a 1 min con contexto (0 = automático)
+    peak_seconds: int = 20         # tamaño de la ventana para detectar picos
 
     # Edición
     vertical: bool = True          # 9:16 para Shorts/TikTok/Reels con fondo desenfocado

@@ -3,8 +3,9 @@ import glob
 import json
 import os
 import re
+import shutil
 import subprocess
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 from .utils import Log, require, run
 
@@ -14,18 +15,43 @@ def video_id(url: str) -> str:
     return m.group(1) if m else re.sub(r"[^A-Za-z0-9_-]", "_", os.path.basename(url))[:40] or "video"
 
 
-def probe(url: str, cookies: str = "") -> dict:
-    cmd = [require("yt-dlp"), "-J", "--skip-download", "--no-playlist", url]
+CLIENT_FALLBACKS = ["", "web_safari", "mweb", "tv"]
+
+
+def _base_args(cookies: str = "", cookies_browser: str = "", client: str = "") -> List[str]:
+    args = [require("yt-dlp"), "--no-playlist"]
+    # YouTube exige un motor JavaScript; se usa deno o, si no está, node.
+    if not shutil.which("deno") and shutil.which("node"):
+        args += ["--js-runtimes", "node"]
     if cookies:
-        cmd[1:1] = ["--cookies", cookies]
-    out = subprocess.run(cmd, capture_output=True, text=True)
-    if out.returncode != 0:
-        raise RuntimeError("yt-dlp no pudo leer el vídeo:\n" + out.stderr[-1500:])
-    return json.loads(out.stdout)
+        args += ["--cookies", cookies]
+    elif cookies_browser:
+        args += ["--cookies-from-browser", cookies_browser]
+    if client:
+        args += ["--extractor-args", f"youtube:player_client={client}"]
+    return args
+
+
+def probe(url: str, cookies: str = "", cookies_browser: str = "") -> Tuple[dict, str]:
+    """Lee la información del vídeo probando varios clientes de YouTube. Devuelve (info, cliente)."""
+    last = ""
+    for client in CLIENT_FALLBACKS:
+        out = subprocess.run(_base_args(cookies, cookies_browser, client) + ["-J", "--skip-download", url],
+                             capture_output=True, text=True, encoding="utf-8", errors="replace")
+        if out.returncode == 0:
+            info = json.loads(out.stdout)
+            if info.get("formats"):
+                return info, client
+        last = out.stderr[-1200:]
+    hint = ""
+    if "not a bot" in last or "Sign in" in last:
+        hint = ("\n\nYouTube pide iniciar sesión. Solución: usa la opción 'cookies del navegador' "
+                "(chrome/edge/firefox) o un archivo cookies.txt. Más detalles en el README.")
+    raise RuntimeError("yt-dlp no pudo leer el vídeo:\n" + last + hint)
 
 
 def download(url: str, outdir: str, log: Log, cookies: str = "", max_height: int = 1080,
-             limit_minutes: int = 0) -> Tuple[str, Optional[str], dict]:
+             limit_minutes: int = 0, cookies_browser: str = "") -> Tuple[str, Optional[str], dict]:
     """Devuelve (ruta_video, ruta_chat_o_None, info)."""
     os.makedirs(outdir, exist_ok=True)
     existing = [p for p in glob.glob(os.path.join(outdir, "source.*"))
@@ -38,7 +64,7 @@ def download(url: str, outdir: str, log: Log, cookies: str = "", max_height: int
             return existing[0], chat, json.load(f)
 
     log("Leyendo información del vídeo...")
-    info = probe(url, cookies)
+    info, client = probe(url, cookies, cookies_browser)
     slim = {k: info.get(k) for k in ("id", "title", "uploader", "channel", "duration",
                                       "is_live", "was_live", "live_status", "webpage_url")}
     with open(info_path, "w", encoding="utf-8") as f:
@@ -46,12 +72,9 @@ def download(url: str, outdir: str, log: Log, cookies: str = "", max_height: int
     log(f"Título: {slim.get('title')} | estado: {slim.get('live_status')}")
 
     h = max_height
-    cmd = [require("yt-dlp"), "--no-playlist", "--newline",
-           "-f", f"bv*[height<={h}]+ba/b[height<={h}]/b",
-           "--merge-output-format", "mp4",
-           "-o", os.path.join(outdir, "source.%(ext)s")]
-    if cookies:
-        cmd += ["--cookies", cookies]
+    cmd = _base_args(cookies, cookies_browser, client) + [
+        "--newline", "-f", f"bv*[height<={h}]+ba/b[height<={h}]/b",
+        "--merge-output-format", "mp4", "-o", os.path.join(outdir, "source.%(ext)s")]
     if slim.get("live_status") == "is_live":
         log("El directo sigue en emisión: se descarga desde el principio hasta ahora "
             "(o hasta el límite de minutos).")
@@ -64,10 +87,9 @@ def download(url: str, outdir: str, log: Log, cookies: str = "", max_height: int
     # Chat repetido del directo (si existe): sirve para detectar los momentos con más reacciones.
     if slim.get("live_status") in ("was_live", "post_live"):
         try:
-            chat_cmd = [require("yt-dlp"), "--skip-download", "--write-subs", "--sub-langs", "live_chat",
-                        "--no-playlist", "-o", os.path.join(outdir, "chat.%(ext)s"), url]
-            if cookies:
-                chat_cmd[1:1] = ["--cookies", cookies]
+            chat_cmd = _base_args(cookies, cookies_browser) + [
+                "--skip-download", "--write-subs", "--sub-langs", "live_chat",
+                "-o", os.path.join(outdir, "chat.%(ext)s"), url]
             log("Descargando el chat del directo (para detectar momentos clave)...")
             run(chat_cmd, log=_throttle(log))
         except Exception as e:  # el chat es opcional
